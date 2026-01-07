@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Description>Backtest Harness - Connects StructImbL1Edge with Backtest Engine</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Backtest Components -->
+    <ProjectReference Include="..\QTS.Backtest.Contracts\QTS.Backtest.Contracts.csproj" />
+    <ProjectReference Include="..\QTS.Backtest.Engine\QTS.Backtest.Engine.csproj" />
+    
+    <!-- Production Algo -->
+    <ProjectReference Include="..\QTS.Edge.Core\QTS.Edge.Core.csproj" />
+    <ProjectReference Include="..\QTS.Edge.TradeManagement\QTS.Edge.TradeManagement.csproj" />
+  </ItemGroup>
+
+</Project>

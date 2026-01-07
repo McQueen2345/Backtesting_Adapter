@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Description>Backtest Engine - Order Simulation, Session Management, PnL Tracking</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\QTS.Backtest.Contracts\QTS.Backtest.Contracts.csproj" />
+    <ProjectReference Include="..\QTS.Backtest.Adapter\QTS.Backtest.Adapter.csproj" />
+  </ItemGroup>
+
+  <!-- TimeZoneConverter für robuste Timezone-Handling -->
+  <ItemGroup>
+    <PackageReference Include="TimeZoneConverter" Version="6.1.0" />
+  </ItemGroup>
+
+</Project>

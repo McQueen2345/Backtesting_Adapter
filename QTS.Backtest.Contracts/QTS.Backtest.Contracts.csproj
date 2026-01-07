@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Description>Shared contracts, interfaces and DTOs for QTS Backtest System</Description>
+  </PropertyGroup>
+
+  <!-- Referenz zu QTS.Edge.Core für IDomSnapshot Kompatibilität -->
+  <ItemGroup>
+    <ProjectReference Include="..\QTS.Edge.Core\QTS.Edge.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,2243 @@
+# 🧪 CLAUDE CODE - VOLLSTÄNDIGE TEST-SUITE (Phase A-J)
+## QTS.Edge StructImb_L1 - 97 neue Tests
+
+---
+
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║  🚨🚨🚨 ABSOLUTES VERBOT - LIES DAS ZUERST! 🚨🚨🚨            ║
+# ╚═══════════════════════════════════════════════════════════════╝
+
+## ❌ DU DARFST NIEMALS:
+
+```
+❌ Dateien in QTS.Edge.Core/ ÄNDERN
+❌ Dateien in QTS.Edge.Core/ ERSTELLEN
+❌ Dateien in QTS.Edge.Core/ LÖSCHEN
+❌ Produktiven Code "fixen"
+❌ Produktiven Code "verbessern"
+❌ Produktiven Code "refactoren"
+❌ Produktiven Code "optimieren"
+❌ Bugs im produktiven Code beheben
+❌ IRGENDWELCHE .cs Dateien außerhalb von QTS.Edge.Tests/ anfassen
+```
+
+## ✅ DU DARFST NUR:
+
+```
+✅ Dateien in QTS.Edge.Tests/ ERSTELLEN
+✅ Dateien in QTS.Edge.Tests/ ÄNDERN
+✅ Tests ausführen (dotnet test)
+✅ Fehler DOKUMENTIEREN (nicht fixen!)
+✅ Reports erstellen (.md Dateien)
+```
+
+## ⚠️ WENN EIN TEST FEHLSCHLÄGT:
+
+```
+RICHTIG: Dokumentiere den Fehler im Report
+FALSCH:  Ändere den produktiven Code damit der Test passt
+
+Der Mensch entscheidet NACH dem Test welche Fixes gemacht werden!
+```
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# DEINE AUFGABE
+# ═══════════════════════════════════════════════════════════════
+
+1. Erstelle ALLE Test-Dateien (Phase A-J) in QTS.Edge.Tests/
+2. Führe ALLE Tests aus
+3. Dokumentiere ALLE Ergebnisse im Report
+4. ÄNDERE KEINEN PRODUKTIVEN CODE!
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# ORDNERSTRUKTUR FÜR NEUE TESTS
+# ═══════════════════════════════════════════════════════════════
+
+```
+QTS.Edge.Tests/
+├── Determinism/
+│   └── DeterminismTests.cs          (Phase A)
+├── EdgeCases/
+│   └── BoundaryTests.cs             (Phase B)
+├── Stability/
+│   └── NumericalStabilityTests.cs   (Phase C)
+├── Integration/
+│   ├── QualityGateInteractionTests.cs   (Phase D)
+│   ├── HystereseCooldownTests.cs        (Phase E)
+│   └── BacktestReproducibilityTests.cs  (Phase J)
+├── Timing/
+│   └── StaleDetectionTests.cs       (Phase F)
+├── Stress/
+│   └── StressTests.cs               (Phase G)
+├── Concurrency/
+│   └── ThreadSafetyTests.cs         (Phase H)
+└── Validation/
+    └── InputValidationTests.cs      (Phase I)
+```
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# PHASE A: DETERMINISMUS & STATE-ISOLATION (7 Tests)
+# ═══════════════════════════════════════════════════════════════
+
+**Datei:** `QTS.Edge.Tests/Determinism/DeterminismTests.cs`
+
+```csharp
+using FluentAssertions;
+using Moq;
+using QTS.Edge.Core;
+using QTS.Edge.Core.Configuration;
+using QTS.Edge.Core.Interfaces;
+using QTS.Edge.Core.Models;
+using QTS.Edge.Core.Statistics;
+using QTS.Edge.Core.Calculators;
+using Xunit;
+
+namespace QTS.Edge.Tests.Determinism;
+
+public class DeterminismTests
+{
+    [Fact]
+    public void Edge_SameInputs_ProduceIdenticalOutputs()
+    {
+        // Zwei Edge-Instanzen mit identischen Inputs müssen identische Outputs liefern
+        var config = EdgeConfiguration.Default;
+        var edge1 = EdgeFactory.Create(config);
+        var edge2 = EdgeFactory.Create(config);
+        
+        var timestamp = DateTime.UtcNow;
+        var snapshots = Enumerable.Range(0, 500)
+            .Select(i => new DomSnapshot(
+                timestamp.AddMilliseconds(i * 100),
+                5000.00m,
+                50 + (i % 100),
+                5000.25m,
+                50 + ((i + 30) % 100)
+            )).ToList();
+        
+        foreach (var snapshot in snapshots)
+        {
+            var signal1 = edge1.ProcessSnapshot(snapshot);
+            var signal2 = edge2.ProcessSnapshot(snapshot);
+            
+            signal1.Signal.Should().Be(signal2.Signal);
+            signal1.StructImbRaw.Should().Be(signal2.StructImbRaw);
+            signal1.StructImbZ.Should().Be(signal2.StructImbZ);
+        }
+    }
+
+    [Fact]
+    public void Edge_MultipleRuns_ProduceSameResults()
+    {
+        // Gleiche Daten mehrfach durchlaufen → gleiche Ergebnisse
+        var config = EdgeConfiguration.Default;
+        var timestamp = DateTime.UtcNow;
+        var snapshots = Enumerable.Range(0, 300)
+            .Select(i => new DomSnapshot(
+                timestamp.AddMilliseconds(i * 100),
+                5000.00m,
+                50 + (i % 50),
+                5000.25m,
+                50 + ((i + 20) % 50)
+            )).ToList();
+        
+        // Lauf 1
+        var edge1 = EdgeFactory.Create(config);
+        var results1 = snapshots.Select(s => edge1.ProcessSnapshot(s)).ToList();
+        
+        // Lauf 2 (neue Instanz)
+        var edge2 = EdgeFactory.Create(config);
+        var results2 = snapshots.Select(s => edge2.ProcessSnapshot(s)).ToList();
+        
+        for (int i = 0; i < results1.Count; i++)
+        {
+            results1[i].Signal.Should().Be(results2[i].Signal, $"Mismatch at index {i}");
+            results1[i].StructImbZ.Should().Be(results2[i].StructImbZ, $"Mismatch at index {i}");
+        }
+    }
+
+    [Fact]
+    public void RollingStatistics_MedianMad_ConsistentAcrossMultipleCalls()
+    {
+        // Median und MAD müssen bei mehrfachen Aufrufen identisch sein (Cache)
+        var stats = new RollingStatistics(1000, 200);
+        
+        for (int i = 0; i < 500; i++)
+            stats.Add(Math.Sin(i * 0.1));
+        
+        var median1 = stats.GetMedian();
+        var mad1 = stats.GetMad();
+        var median2 = stats.GetMedian();
+        var mad2 = stats.GetMad();
+        var median3 = stats.GetMedian();
+        var mad3 = stats.GetMad();
+        
+        median1.Should().Be(median2);
+        median2.Should().Be(median3);
+        mad1.Should().Be(mad2);
+        mad2.Should().Be(mad3);
+    }
+
+    [Fact]
+    public void RollingStatistics_LowerMedian_ForEvenCount()
+    {
+        // Bei gerader Anzahl: LOWER Median, nicht interpoliert!
+        var stats = new RollingStatistics(100, 1);
+        
+        stats.Add(1);
+        stats.Add(2);
+        stats.Add(3);
+        stats.Add(4);
+        
+        stats.GetMedian().Should().Be(2, "Lower median should be used for even count");
+    }
+
+    [Fact]
+    public void Reset_ClearsAllState_Completely()
+    {
+        // Nach Reset darf KEIN alter State "durchbluten"
+        var config = EdgeConfiguration.Default;
+        var edge = EdgeFactory.Create(config);
+        
+        var timestamp = DateTime.UtcNow;
+        
+        // Fülle mit Daten
+        for (int i = 0; i < 300; i++)
+        {
+            var snapshot = new DomSnapshot(
+                timestamp.AddMilliseconds(i * 100),
+                5000.00m, 100, 5000.25m, 20); // Starke Imbalance
+            edge.ProcessSnapshot(snapshot);
+        }
+        
+        // Reset
+        edge.Reset();
+        
+        // Erste Snapshots nach Reset sollten FLAT sein (nicht warm)
+        for (int i = 0; i < 50; i++)
+        {
+            var snapshot = new DomSnapshot(
+                timestamp.AddMilliseconds((300 + i) * 100),
+                5000.00m, 50, 5000.25m, 50);
+            var signal = edge.ProcessSnapshot(snapshot);
+            
+            signal.IsContextWarm.Should().BeFalse($"Should not be warm after reset at index {i}");
+            signal.Signal.Should().Be(0);
+        }
+    }
+
+    [Fact]
+    public void Reset_RollingStatistics_IsClean()
+    {
+        var stats = new RollingStatistics(1000, 200);
+        
+        for (int i = 0; i < 500; i++)
+            stats.Add(i);
+        
+        stats.IsWarm.Should().BeTrue();
+        stats.Count.Should().Be(500);
+        
+        stats.Reset();
+        
+        stats.Count.Should().Be(0);
+        stats.IsWarm.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Reset_SignalGenerator_IsClean()
+    {
+        var config = EdgeConfiguration.Default;
+        var generator = new SignalGenerator(config);
+        
+        // Generiere Signal
+        var timestamp = DateTime.UtcNow;
+        generator.Generate(2.0, timestamp, true, false, true);
+        
+        generator.CurrentSignal.Should().Be(1);
+        generator.SignalTimestamp.Should().NotBeNull();
+        
+        // Reset
+        generator.Reset();
+        
+        generator.CurrentSignal.Should().Be(0);
+        generator.SignalTimestamp.Should().BeNull();
+    }
+}
+```
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# PHASE B: EDGE CASES & GRENZWERTE (20 Tests)
+# ═══════════════════════════════════════════════════════════════
+
+**Datei:** `QTS.Edge.Tests/EdgeCases/BoundaryTests.cs`
+
+```csharp
+using FluentAssertions;
+using QTS.Edge.Core;
+using QTS.Edge.Core.Calculators;
+using QTS.Edge.Core.Configuration;
+using QTS.Edge.Core.Gates;
+using QTS.Edge.Core.Models;
+using QTS.Edge.Core.Statistics;
+using Xunit;
+
+namespace QTS.Edge.Tests.EdgeCases;
+
+public class BoundaryTests
+{
+    #region StructImbCalculator Boundaries
+
+    [Fact]
+    public void StructImb_MaxInt_HandlesCorrectly()
+    {
+        var calc = new StructImbCalculator();
+        
+        // Sollte nicht crashen
+        var result1 = calc.Calculate(int.MaxValue, 1);
+        var result2 = calc.Calculate(1, int.MaxValue);
+        
+        result1.Should().BeInRange(-1.0, 1.0);
+        result2.Should().BeInRange(-1.0, 1.0);
+    }
+
+    [Fact]
+    public void StructImb_ZeroZero_ReturnsZero()
+    {
+        var calc = new StructImbCalculator();
+        var result = calc.Calculate(0, 0);
+        
+        result.Should().Be(0.0);
+        double.IsNaN(result).Should().BeFalse();
+    }
+
+    [Fact]
+    public void StructImb_NegativeValues_TreatedAsZero()
+    {
+        var calc = new StructImbCalculator();
+        
+        var result1 = calc.Calculate(-100, 100);
+        var result2 = calc.Calculate(100, -100);
+        
+        result1.Should().Be(-1.0); // 0 vs 100
+        result2.Should().Be(1.0);  // 100 vs 0
+    }
+
+    [Fact]
+    public void StructImb_ExtremeImbalance_StaysInRange()
+    {
+        var calc = new StructImbCalculator();
+        
+        for (int i = 0; i < 1000; i++)
+        {
+            var bid = Random.Shared.Next(0, 10000);
+            var ask = Random.Shared.Next(0, 10000);
+            var result = calc.Calculate(bid, ask);
+            
+            result.Should().BeInRange(-1.0, 1.0);
+        }
+    }
+
+    #endregion
+
+    #region RollingStatistics Boundaries
+
+    [Fact]
+    public void RollingStats_ExactlyMinWarmup_IsWarm()
+    {
+        var stats = new RollingStatistics(1000, 200);
+        
+        for (int i = 0; i < 199; i++)
+            stats.Add(i);
+        
+        stats.IsWarm.Should().BeFalse();
+        
+        stats.Add(199);
+        stats.IsWarm.Should().BeTrue();
+    }
+
+    [Fact]
+    public void RollingStats_ExactlyWindowSize_NoOverflow()
+    {
+        var stats = new RollingStatistics(100, 10);
+        
+        for (int i = 0; i < 100; i++)
+            stats.Add(i);
+        
+        stats.Count.Should().Be(100);
+    }
+
+    [Fact]
+    public void RollingStats_WindowOverflow_FIFO()
+    {
+        var stats = new RollingStatistics(100, 10);
+        
+        for (int i = 0; i < 150; i++)
+            stats.Add(i);
+        
+        stats.Count.Should().Be(100);
+        // Median sollte von den letzten 100 Werten sein (50-149)
+        stats.GetMedian().Should().BeGreaterThan(49);
+    }
+
+    [Fact]
+    public void RollingStats_SingleValue_MedianIsThatValue()
+    {
+        var stats = new RollingStatistics(100, 1);
+        stats.Add(42.5);
+        
+        stats.GetMedian().Should().Be(42.5);
+    }
+
+    [Fact]
+    public void RollingStats_AllSameValues_MadIsZero()
+    {
+        var stats = new RollingStatistics(100, 10);
+        
+        for (int i = 0; i < 50; i++)
+            stats.Add(5.0);
+        
+        stats.GetMad().Should().Be(0.0);
+    }
+
+    #endregion
+
+    #region ZScoreCalculator Boundaries
+
+    [Fact]
+    public void ZScore_ExactlyAtThreshold_GeneratesSignal()
+    {
+        var config = EdgeConfiguration.Default;
+        var generator = new SignalGenerator(config);
+        
+        var signal = generator.Generate(1.5, DateTime.UtcNow, true, false, true);
+        
+        signal.Should().Be(1); // LONG bei Z = 1.5
+    }
+
+    [Fact]
+    public void ZScore_JustBelowThreshold_NoSignal()
+    {
+        var config = EdgeConfiguration.Default;
+        var generator = new SignalGenerator(config);
+        
+        var signal = generator.Generate(1.4999, DateTime.UtcNow, true, false, true);
+        
+        signal.Should().Be(0);
+    }
+
+    [Fact]
+    public void ZScore_AtClipBoundary_IsClipped()
+    {
+        var config = EdgeConfiguration.Default;
+        var calc = new ZScoreCalculator(config);
+        
+        var result1 = calc.Calculate(1000.0, 0.0, 0.1);
+        var result2 = calc.Calculate(-1000.0, 0.0, 0.1);
+        
+        result1.Should().Be(5.0);
+        result2.Should().Be(-5.0);
+    }
+
+    #endregion
+
+    #region SignalGenerator Boundaries
+
+    [Fact]
+    public void Signal_ExactlyAtHysteresisThreshold_Changes()
+    {
+        var config = EdgeConfiguration.Default;
+        var generator = new SignalGenerator(config);
+        
+        var t0 = DateTime.UtcNow;
+        
+        // Erst LONG
+        generator.Generate(2.0, t0, true, false, true);
+        generator.CurrentSignal.Should().Be(1);
+        
+        // Bei Z = -2.0 sollte Wechsel zu SHORT möglich sein (nach Cooldown)
+        var t1 = t0.AddMilliseconds(1100);
+        generator.Generate(-2.0, t1, true, false, true);
+        generator.CurrentSignal.Should().Be(-1);
+    }
+
+    [Fact]
+    public void Signal_JustAboveHysteresisThreshold_NoChange()
+    {
+        var config = EdgeConfiguration.Default;
+        var generator = new SignalGenerator(config);
+        
+        var t0 = DateTime.UtcNow;
+        
+        // Erst LONG
+        generator.Generate(2.0, t0, true, false, true);
+        generator.CurrentSignal.Should().Be(1);
+        
+        // Bei Z = -1.99 sollte KEIN Wechsel passieren
+        var t1 = t0.AddMilliseconds(1100);
+        generator.Generate(-1.99, t1, true, false, true);
+        generator.CurrentSignal.Should().Be(1); // Bleibt LONG
+    }
+
+    [Fact]
+    public void Signal_ExactlyAtExitThreshold_Exits()
+    {
+        var config = EdgeConfiguration.Default;
+        var generator = new SignalGenerator(config);
+        
+        // Erst LONG
+        generator.Generate(2.0, DateTime.UtcNow, true, false, true);
+        generator.CurrentSignal.Should().Be(1);
+        
+        // Bei Z < 1.0 sollte Exit zu FLAT
+        generator.Generate(0.99, DateTime.UtcNow.AddMilliseconds(100), true, false, true);
+        generator.CurrentSignal.Should().Be(0);
+    }
+
+    [Fact]
+    public void Signal_ExactlyAtCooldown_CanChange()
+    {
+        var config = EdgeConfiguration.Default;
+        var generator = new SignalGenerator(config);
+        
+        var t0 = DateTime.UtcNow;
+        generator.Generate(2.0, t0, true, false, true);
+        
+        // Exakt nach 1000ms sollte Wechsel möglich sein
+        var t1 = t0.AddMilliseconds(1000);
+        generator.Generate(-2.5, t1, true, false, true);
+        generator.CurrentSignal.Should().Be(-1);
+    }
+
+    [Fact]
+    public void Signal_JustBeforeCooldown_CannotChange()
+    {
+        var config = EdgeConfiguration.Default;
+        var generator = new SignalGenerator(config);
+        
+        var t0 = DateTime.UtcNow;
+        generator.Generate(2.0, t0, true, false, true);
+        
+        // 999ms - noch im Cooldown
+        var t1 = t0.AddMilliseconds(999);
+        generator.Generate(-2.5, t1, true, false, true);
+        generator.CurrentSignal.Should().Be(1); // Bleibt LONG
+    }
+
+    #endregion
+
+    #region QualityGate Boundaries
+
+    [Fact]
+    public void SpreadGate_ExactlyAtMax_Passes()
+    {
+        var config = EdgeConfiguration.Default;
+        var gate = new SpreadQualityGate(config);
+        
+        // 4 Ticks Spread bei TickSize 0.25 = 1.00
+        var snapshot = new DomSnapshot(DateTime.UtcNow, 5000.00m, 100, 5001.00m, 100);
+        
+        gate.Check(snapshot).Should().BeTrue();
+    }
+
+    [Fact]
+    public void SpreadGate_JustOverMax_Fails()
+    {
+        var config = EdgeConfiguration.Default;
+        var gate = new SpreadQualityGate(config);
+        
+        // 5 Ticks Spread = 1.25
+        var snapshot = new DomSnapshot(DateTime.UtcNow, 5000.00m, 100, 5001.25m, 100);
+        
+        gate.Check(snapshot).Should().BeFalse();
+    }
+
+    [Fact]
+    public void DepthGate_ExactlyAtMin_Passes()
+    {
+        var config = EdgeConfiguration.Default;
+        var gate = new DepthQualityGate(config);
+        
+        var snapshot = new DomSnapshot(DateTime.UtcNow, 5000.00m, 1, 5000.25m, 1);
+        
+        gate.Check(snapshot).Should().BeTrue();
+    }
+
+    [Fact]
+    public void DepthGate_ZeroOnOneSide_Fails()
+    {
+        var config = EdgeConfiguration.Default;
+        var gate = new DepthQualityGate(config);
+        
+        var snapshot1 = new DomSnapshot(DateTime.UtcNow, 5000.00m, 0, 5000.25m, 100);
+        var snapshot2 = new DomSnapshot(DateTime.UtcNow, 5000.00m, 100, 5000.25m, 0);
+        
+        gate.Check(snapshot1).Should().BeFalse();
+        gate.Check(snapshot2).Should().BeFalse();
+    }
+
+    #endregion
+}
+```
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# PHASE C: NUMERISCHE STABILITÄT (12 Tests)
+# ═══════════════════════════════════════════════════════════════
+
+**Datei:** `QTS.Edge.Tests/Stability/NumericalStabilityTests.cs`
+
+```csharp
+using FluentAssertions;
+using QTS.Edge.Core.Calculators;
+using QTS.Edge.Core.Configuration;
+using QTS.Edge.Core.Gates;
+using QTS.Edge.Core.Models;
+using QTS.Edge.Core.Statistics;
+using Xunit;
+
+namespace QTS.Edge.Tests.Stability;
+
+public class NumericalStabilityTests
+{
+    [Fact]
+    public void ZScore_MadZero_UsesEpsilonNotDivideByZero()
+    {
+        var config = EdgeConfiguration.Default;
+        var calc = new ZScoreCalculator(config);
+        
+        // MAD = 0 sollte Epsilon verwenden
+        var result = calc.Calculate(0.5, 0.0, 0.0);
+        
+        double.IsNaN(result).Should().BeFalse();
+        double.IsInfinity(result).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ZScore_VerySmallMad_NoOverflow()
+    {
+        var config = EdgeConfiguration.Default;
+        var calc = new ZScoreCalculator(config);
+        
+        var result = calc.Calculate(0.5, 0.0, 0.0000001);
+        
+        double.IsNaN(result).Should().BeFalse();
+        double.IsInfinity(result).Should().BeFalse();
+        result.Should().BeInRange(-5.0, 5.0);
+    }
+
+    [Fact]
+    public void ZScore_VeryLargeValue_ClipsCorrectly()
+    {
+        var config = EdgeConfiguration.Default;
+        var calc = new ZScoreCalculator(config);
+        
+        var result = calc.Calculate(1000000.0, 0.0, 0.001);
+        
+        result.Should().Be(5.0);
+    }
+
+    [Fact]
+    public void StructImb_LargeVolumes_NoIntegerOverflow()
+    {
+        var calc = new StructImbCalculator();
+        
+        var result = calc.Calculate(1_000_000, 1_000_000);
+        
+        result.Should().Be(0.0);
+        double.IsNaN(result).Should().BeFalse();
+    }
+
+    [Fact]
+    public void RollingStats_ExtremeValues_StableMedian()
+    {
+        var stats = new RollingStatistics(100, 10);
+        
+        // Mix aus extremen Werten
+        stats.Add(1e10);
+        stats.Add(-1e10);
+        stats.Add(0.0);
+        stats.Add(1e-10);
+        stats.Add(-1e-10);
+        
+        for (int i = 0; i < 50; i++)
+            stats.Add(i);
+        
+        var median = stats.GetMedian();
+        
+        double.IsNaN(median).Should().BeFalse();
+        double.IsInfinity(median).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ZScore_ResultNeverNaN()
+    {
+        var config = EdgeConfiguration.Default;
+        var calc = new ZScoreCalculator(config);
+        
+        var testCases = new[]
+        {
+            (0.0, 0.0, 0.0),
+            (double.MaxValue, 0.0, 1.0),
+            (double.MinValue, 0.0, 1.0),
+            (1.0, double.MaxValue, 1.0),
+            (1.0, 0.0, double.MaxValue),
+        };
+        
+        foreach (var (value, median, mad) in testCases)
+        {
+            var result = calc.Calculate(value, median, mad);
+            double.IsNaN(result).Should().BeFalse($"NaN for inputs ({value}, {median}, {mad})");
+        }
+    }
+
+    [Fact]
+    public void ZScore_ResultNeverInfinity()
+    {
+        var config = EdgeConfiguration.Default;
+        var calc = new ZScoreCalculator(config);
+        
+        var testCases = new[]
+        {
+            (1e308, 0.0, 1e-308),
+            (-1e308, 0.0, 1e-308),
+            (1.0, 0.0, 0.0),
+        };
+        
+        foreach (var (value, median, mad) in testCases)
+        {
+            var result = calc.Calculate(value, median, mad);
+            double.IsInfinity(result).Should().BeFalse($"Infinity for inputs ({value}, {median}, {mad})");
+        }
+    }
+
+    [Fact]
+    public void SpreadGate_DecimalPrecision_NoFloatErrors()
+    {
+        var config = EdgeConfiguration.Default;
+        var gate = new SpreadQualityGate(config);
+        
+        // Exakt 4 Ticks: 1.00 / 0.25 = 4
+        var snapshot = new DomSnapshot(DateTime.UtcNow, 5000.00m, 100, 5001.00m, 100);
+        
+        gate.Check(snapshot).Should().BeTrue("4 ticks should pass");
+        
+        // Exakt 4.25 Ticks (5 ticks - 1/4) - sollte failen
+        var snapshot2 = new DomSnapshot(DateTime.UtcNow, 5000.00m, 100, 5001.0625m, 100);
+        gate.Check(snapshot2).Should().BeFalse("4.25 ticks should fail");
+    }
+
+    [Fact]
+    public void StructImb_IntMaxValue_NoOverflow()
+    {
+        var calc = new StructImbCalculator();
+        
+        // Diese sollten nicht crashen
+        Action act1 = () => calc.Calculate(int.MaxValue, int.MaxValue);
+        Action act2 = () => calc.Calculate(int.MaxValue, 0);
+        Action act3 = () => calc.Calculate(0, int.MaxValue);
+        
+        act1.Should().NotThrow();
+        act2.Should().NotThrow();
+        act3.Should().NotThrow();
+    }
+
+    [Fact]
+    public void SpreadGate_DecimalMaxValue_NoOverflow()
+    {
+        var config = EdgeConfiguration.Default;
+        var gate = new SpreadQualityGate(config);
+        
+        // Extreme Preise sollten nicht crashen
+        var snapshot = new DomSnapshot(DateTime.UtcNow, decimal.MaxValue - 1, 100, decimal.MaxValue, 100);
+        
+        Action act = () => gate.Check(snapshot);
+        // Sollte entweder false zurückgeben oder Exception werfen, aber nicht crashen
+        act.Should().NotThrow<OverflowException>("Should handle extreme prices gracefully");
+    }
+
+    [Theory]
+    [InlineData(0.0, 0.0, 0.0)]
+    [InlineData(1e-10, 1e-10, 1e-10)]
+    [InlineData(1e10, 1e10, 1e10)]
+    [InlineData(-1e10, 1e10, 1e5)]
+    public void ZScore_ExtremeInputs_NeverCrashes(double value, double median, double mad)
+    {
+        var config = EdgeConfiguration.Default;
+        var calc = new ZScoreCalculator(config);
+        
+        Action act = () => calc.Calculate(value, median, mad);
+        act.Should().NotThrow();
+    }
+}
+```
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# PHASE D: QUALITY GATE INTERACTION (9 Tests)
+# ═══════════════════════════════════════════════════════════════
+
+**Datei:** `QTS.Edge.Tests/Integration/QualityGateInteractionTests.cs`
+
+```csharp
+using FluentAssertions;
+using Moq;
+using QTS.Edge.Core;
+using QTS.Edge.Core.Configuration;
+using QTS.Edge.Core.Gates;
+using QTS.Edge.Core.Interfaces;
+using QTS.Edge.Core.Models;
+using Xunit;
+
+namespace QTS.Edge.Tests.Integration;
+
+public class QualityGateInteractionTests
+{
+    [Fact]
+    public void Edge_QualityGateFail_SignalIsZero()
+    {
+        var config = EdgeConfiguration.Default;
+        var edge = EdgeFactory.Create(config);
+        
+        // Warmup mit guten Daten
+        var t = DateTime.UtcNow;
+        for (int i = 0; i < 250; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 100, 5000.25m, 20)); // Imbalance
+        }
+        
+        // Jetzt Snapshot mit zu großem Spread (>4 Ticks)
+        var badSnapshot = new DomSnapshot(
+            t.AddMilliseconds(25100),
+            5000.00m, 100, 5002.00m, 20); // 8 Ticks Spread!
+        
+        var signal = edge.ProcessSnapshot(badSnapshot);
+        
+        signal.Signal.Should().Be(0);
+        signal.IsQualityGatePassed.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Edge_IsDataStale_SignalIsZero()
+    {
+        var config = EdgeConfiguration.Default;
+        var edge = EdgeFactory.Create(config);
+        
+        // Warmup
+        var t = DateTime.UtcNow;
+        for (int i = 0; i < 250; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 100, 5000.25m, 20));
+        }
+        
+        // Stale Snapshot
+        var staleSnapshot = new DomSnapshot(
+            t.AddMilliseconds(25100),
+            5000.00m, 100, 5000.25m, 20,
+            IsDataStale: true);
+        
+        var signal = edge.ProcessSnapshot(staleSnapshot);
+        
+        signal.Signal.Should().Be(0);
+        signal.IsDataStale.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Edge_QualityGateFail_StructImbStillCalculated()
+    {
+        var config = EdgeConfiguration.Default;
+        var edge = EdgeFactory.Create(config);
+        
+        // Snapshot mit zu großem Spread
+        var badSnapshot = new DomSnapshot(
+            DateTime.UtcNow,
+            5000.00m, 100, 5002.00m, 50); // 8 Ticks Spread, aber gültige Sizes
+        
+        var signal = edge.ProcessSnapshot(badSnapshot);
+        
+        // StructImbRaw sollte trotzdem berechnet werden
+        signal.StructImbRaw.Should().NotBe(0.0); // (100-50)/(100+50) = 0.333
+    }
+
+    [Fact]
+    public void CompositeGate_AllMustPass()
+    {
+        var config = EdgeConfiguration.Default;
+        var spreadGate = new SpreadQualityGate(config);
+        var depthGate = new DepthQualityGate(config);
+        var composite = new CompositeQualityGate(spreadGate, depthGate);
+        
+        // Spread OK, Depth OK
+        var good = new DomSnapshot(DateTime.UtcNow, 5000.00m, 100, 5000.25m, 100);
+        composite.Check(good).Should().BeTrue();
+        
+        // Spread FAIL, Depth OK
+        var badSpread = new DomSnapshot(DateTime.UtcNow, 5000.00m, 100, 5002.00m, 100);
+        composite.Check(badSpread).Should().BeFalse();
+        
+        // Spread OK, Depth FAIL
+        var badDepth = new DomSnapshot(DateTime.UtcNow, 5000.00m, 0, 5000.25m, 100);
+        composite.Check(badDepth).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Edge_GateFailAfterWarmup_StaysWarm()
+    {
+        var config = EdgeConfiguration.Default;
+        var edge = EdgeFactory.Create(config);
+        
+        var t = DateTime.UtcNow;
+        
+        // Warmup
+        for (int i = 0; i < 250; i++)
+        {
+            var s = edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 100, 5000.25m, 100));
+        }
+        
+        // Gate Fail
+        var fail = edge.ProcessSnapshot(new DomSnapshot(
+            t.AddMilliseconds(25100),
+            5000.00m, 0, 5000.25m, 100)); // BidSize = 0
+        
+        // Nächster guter Snapshot sollte immer noch warm sein
+        var next = edge.ProcessSnapshot(new DomSnapshot(
+            t.AddMilliseconds(25200),
+            5000.00m, 100, 5000.25m, 100));
+        
+        next.IsContextWarm.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Edge_AlternatingGoodBad_RemainsStable()
+    {
+        var config = EdgeConfiguration.Default;
+        var edge = EdgeFactory.Create(config);
+        
+        var t = DateTime.UtcNow;
+        
+        // Warmup
+        for (int i = 0; i < 250; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 100, 5000.25m, 100));
+        }
+        
+        // Alternierende gute/schlechte Snapshots
+        for (int i = 0; i < 100; i++)
+        {
+            var isGood = i % 2 == 0;
+            var snapshot = new DomSnapshot(
+                t.AddMilliseconds((250 + i) * 100),
+                5000.00m,
+                isGood ? 100 : 0,  // Good/Bad depth
+                5000.25m,
+                100);
+            
+            var signal = edge.ProcessSnapshot(snapshot);
+            
+            if (!isGood)
+            {
+                signal.IsQualityGatePassed.Should().BeFalse();
+                signal.Signal.Should().Be(0);
+            }
+        }
+    }
+
+    [Fact]
+    public void Edge_LongStaleSequence_RecoversProperly()
+    {
+        var config = EdgeConfiguration.Default;
+        var edge = EdgeFactory.Create(config);
+        
+        var t = DateTime.UtcNow;
+        
+        // Warmup
+        for (int i = 0; i < 250; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 100, 5000.25m, 50));
+        }
+        
+        // Viele stale Snapshots
+        for (int i = 0; i < 100; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds((250 + i) * 100),
+                5000.00m, 100, 5000.25m, 50,
+                IsDataStale: true));
+        }
+        
+        // Recovery
+        var recovery = edge.ProcessSnapshot(new DomSnapshot(
+            t.AddMilliseconds(35100),
+            5000.00m, 100, 5000.25m, 50,
+            IsDataStale: false));
+        
+        recovery.IsContextWarm.Should().BeTrue();
+        recovery.IsDataStale.Should().BeFalse();
+    }
+
+    [Fact]
+    public void SpreadGate_NegativeSpread_Fails()
+    {
+        var config = EdgeConfiguration.Default;
+        var gate = new SpreadQualityGate(config);
+        
+        // Invertierter Markt (Ask < Bid)
+        var inverted = new DomSnapshot(DateTime.UtcNow, 5001.00m, 100, 5000.00m, 100);
+        
+        gate.Check(inverted).Should().BeFalse();
+    }
+
+    [Fact]
+    public void DepthGate_BothZero_Fails()
+    {
+        var config = EdgeConfiguration.Default;
+        var gate = new DepthQualityGate(config);
+        
+        var empty = new DomSnapshot(DateTime.UtcNow, 5000.00m, 0, 5000.25m, 0);
+        
+        gate.Check(empty).Should().BeFalse();
+    }
+}
+```
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# PHASE E: HYSTERESE & COOLDOWN (13 Tests)
+# ═══════════════════════════════════════════════════════════════
+
+**Datei:** `QTS.Edge.Tests/Integration/HystereseCooldownTests.cs`
+
+```csharp
+using FluentAssertions;
+using QTS.Edge.Core.Calculators;
+using QTS.Edge.Core.Configuration;
+using Xunit;
+
+namespace QTS.Edge.Tests.Integration;
+
+public class HystereseCooldownTests
+{
+    private readonly EdgeConfiguration _config = EdgeConfiguration.Default;
+
+    [Fact]
+    public void StateMachine_FlatToLong_AtThreshold()
+    {
+        var gen = new SignalGenerator(_config);
+        var signal = gen.Generate(1.5, DateTime.UtcNow, true, false, true);
+        signal.Should().Be(1);
+    }
+
+    [Fact]
+    public void StateMachine_FlatToShort_AtThreshold()
+    {
+        var gen = new SignalGenerator(_config);
+        var signal = gen.Generate(-1.5, DateTime.UtcNow, true, false, true);
+        signal.Should().Be(-1);
+    }
+
+    [Fact]
+    public void StateMachine_LongToFlat_BelowExitThreshold()
+    {
+        var gen = new SignalGenerator(_config);
+        var t = DateTime.UtcNow;
+        
+        gen.Generate(2.0, t, true, false, true); // LONG
+        gen.CurrentSignal.Should().Be(1);
+        
+        gen.Generate(0.99, t.AddMilliseconds(100), true, false, true); // Exit
+        gen.CurrentSignal.Should().Be(0);
+    }
+
+    [Fact]
+    public void StateMachine_LongStays_AboveExitThreshold()
+    {
+        var gen = new SignalGenerator(_config);
+        var t = DateTime.UtcNow;
+        
+        gen.Generate(2.0, t, true, false, true);
+        gen.Generate(1.2, t.AddMilliseconds(100), true, false, true);
+        
+        gen.CurrentSignal.Should().Be(1); // Bleibt LONG
+    }
+
+    [Fact]
+    public void StateMachine_LongToShort_RequiresHysteresis()
+    {
+        var gen = new SignalGenerator(_config);
+        var t = DateTime.UtcNow;
+        
+        gen.Generate(2.0, t, true, false, true);
+        
+        // -1.9 ist nicht genug (braucht -2.0)
+        gen.Generate(-1.9, t.AddMilliseconds(1100), true, false, true);
+        gen.CurrentSignal.Should().Be(1); // Bleibt LONG
+    }
+
+    [Fact]
+    public void StateMachine_LongToShort_WithHysteresis()
+    {
+        var gen = new SignalGenerator(_config);
+        var t = DateTime.UtcNow;
+        
+        gen.Generate(2.0, t, true, false, true);
+        gen.Generate(-2.0, t.AddMilliseconds(1100), true, false, true);
+        
+        gen.CurrentSignal.Should().Be(-1); // SHORT
+    }
+
+    [Fact]
+    public void StateMachine_ShortToFlat_AboveExitThreshold()
+    {
+        var gen = new SignalGenerator(_config);
+        var t = DateTime.UtcNow;
+        
+        gen.Generate(-2.0, t, true, false, true);
+        gen.Generate(-0.99, t.AddMilliseconds(100), true, false, true);
+        
+        gen.CurrentSignal.Should().Be(0); // FLAT
+    }
+
+    [Fact]
+    public void StateMachine_ShortToLong_RequiresHysteresis()
+    {
+        var gen = new SignalGenerator(_config);
+        var t = DateTime.UtcNow;
+        
+        gen.Generate(-2.0, t, true, false, true);
+        gen.Generate(1.9, t.AddMilliseconds(1100), true, false, true);
+        
+        gen.CurrentSignal.Should().Be(-1); // Bleibt SHORT
+    }
+
+    [Fact]
+    public void Cooldown_BlocksSignalChange()
+    {
+        var gen = new SignalGenerator(_config);
+        var t = DateTime.UtcNow;
+        
+        gen.Generate(2.0, t, true, false, true);
+        gen.Generate(-2.5, t.AddMilliseconds(500), true, false, true); // Zu früh!
+        
+        gen.CurrentSignal.Should().Be(1); // Bleibt LONG
+    }
+
+    [Fact]
+    public void Cooldown_DoesNotBlockExit()
+    {
+        var gen = new SignalGenerator(_config);
+        var t = DateTime.UtcNow;
+        
+        gen.Generate(2.0, t, true, false, true);
+        gen.Generate(0.5, t.AddMilliseconds(100), true, false, true); // Exit sofort
+        
+        gen.CurrentSignal.Should().Be(0); // FLAT (Exit braucht kein Cooldown)
+    }
+
+    [Fact]
+    public void Cooldown_ResetsAfterSignalChange()
+    {
+        var gen = new SignalGenerator(_config);
+        var t = DateTime.UtcNow;
+        
+        gen.Generate(2.0, t, true, false, true); // LONG
+        gen.Generate(-2.5, t.AddMilliseconds(1100), true, false, true); // SHORT (OK)
+        gen.Generate(2.5, t.AddMilliseconds(1500), true, false, true); // Noch im Cooldown!
+        
+        gen.CurrentSignal.Should().Be(-1); // Bleibt SHORT
+    }
+
+    [Fact]
+    public void FullSequence_RealisticScenario()
+    {
+        var gen = new SignalGenerator(_config);
+        var t = DateTime.UtcNow;
+        
+        // 1. Start FLAT
+        gen.CurrentSignal.Should().Be(0);
+        
+        // 2. Z steigt auf 1.8 → LONG
+        gen.Generate(1.8, t, true, false, true);
+        gen.CurrentSignal.Should().Be(1);
+        
+        // 3. Z fällt auf 1.2 → bleibt LONG
+        gen.Generate(1.2, t.AddMilliseconds(100), true, false, true);
+        gen.CurrentSignal.Should().Be(1);
+        
+        // 4. Z fällt auf 0.8 → FLAT
+        gen.Generate(0.8, t.AddMilliseconds(200), true, false, true);
+        gen.CurrentSignal.Should().Be(0);
+        
+        // 5. Z fällt auf -1.8 → SHORT
+        gen.Generate(-1.8, t.AddMilliseconds(300), true, false, true);
+        gen.CurrentSignal.Should().Be(-1);
+    }
+
+    [Fact]
+    public void NotWarm_AlwaysFlat()
+    {
+        var gen = new SignalGenerator(_config);
+        
+        // Auch bei extremem Z: wenn nicht warm → FLAT
+        gen.Generate(5.0, DateTime.UtcNow, false, false, true);
+        gen.CurrentSignal.Should().Be(0);
+    }
+}
+```
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# PHASE F: TIMING & STALE-DETECTION (8 Tests)
+# ═══════════════════════════════════════════════════════════════
+
+**Datei:** `QTS.Edge.Tests/Timing/StaleDetectionTests.cs`
+
+```csharp
+using FluentAssertions;
+using QTS.Edge.Core;
+using QTS.Edge.Core.Configuration;
+using QTS.Edge.Core.Models;
+using Xunit;
+
+namespace QTS.Edge.Tests.Timing;
+
+public class StaleDetectionTests
+{
+    [Fact]
+    public void Stale_FlagTrue_SignalIsZero()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        // Warmup
+        for (int i = 0; i < 250; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 100, 5000.25m, 20));
+        }
+        
+        // Stale
+        var stale = edge.ProcessSnapshot(new DomSnapshot(
+            t.AddMilliseconds(25100),
+            5000.00m, 100, 5000.25m, 20,
+            IsDataStale: true));
+        
+        stale.Signal.Should().Be(0);
+        stale.IsDataStale.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Stale_RecoveryToNormal()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        // Warmup
+        for (int i = 0; i < 250; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 100, 5000.25m, 50));
+        }
+        
+        // Stale
+        edge.ProcessSnapshot(new DomSnapshot(
+            t.AddMilliseconds(25100),
+            5000.00m, 100, 5000.25m, 50,
+            IsDataStale: true));
+        
+        // Recovery
+        var recovered = edge.ProcessSnapshot(new DomSnapshot(
+            t.AddMilliseconds(25200),
+            5000.00m, 100, 5000.25m, 50,
+            IsDataStale: false));
+        
+        recovered.IsDataStale.Should().BeFalse();
+        recovered.IsContextWarm.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Timing_NormalSequence_AllProcessed()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        var count = 0;
+        
+        for (int i = 0; i < 100; i++)
+        {
+            var signal = edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 50, 5000.25m, 50));
+            count++;
+        }
+        
+        count.Should().Be(100);
+    }
+
+    [Fact]
+    public void Timing_SameTimestamp_BothProcessed()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        var s1 = edge.ProcessSnapshot(new DomSnapshot(t, 5000.00m, 100, 5000.25m, 100));
+        var s2 = edge.ProcessSnapshot(new DomSnapshot(t, 5000.00m, 50, 5000.25m, 50));
+        
+        // Beide sollten verarbeitet werden
+        s1.Should().NotBeNull();
+        s2.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Timing_BackwardsTimestamp_StillProcessed()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        edge.ProcessSnapshot(new DomSnapshot(t.AddMilliseconds(1000), 5000.00m, 100, 5000.25m, 100));
+        var backward = edge.ProcessSnapshot(new DomSnapshot(t, 5000.00m, 50, 5000.25m, 50));
+        
+        // Sollte trotzdem verarbeitet werden (Adapter verantwortlich für Sortierung)
+        backward.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Stale_MultipleInSequence_AllZero()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        // Warmup
+        for (int i = 0; i < 250; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 100, 5000.25m, 20));
+        }
+        
+        // Multiple stale
+        for (int i = 0; i < 10; i++)
+        {
+            var stale = edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds((250 + i) * 100),
+                5000.00m, 100, 5000.25m, 20,
+                IsDataStale: true));
+            
+            stale.Signal.Should().Be(0);
+        }
+    }
+
+    [Fact]
+    public void Stale_DoesNotAffectWarmup()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        // 100 normale
+        for (int i = 0; i < 100; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 50, 5000.25m, 50));
+        }
+        
+        // 50 stale
+        for (int i = 0; i < 50; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds((100 + i) * 100),
+                5000.00m, 50, 5000.25m, 50,
+                IsDataStale: true));
+        }
+        
+        // 100 normale → sollte jetzt warm sein
+        IEdgeSignal? lastSignal = null;
+        for (int i = 0; i < 100; i++)
+        {
+            lastSignal = edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds((150 + i) * 100),
+                5000.00m, 50, 5000.25m, 50));
+        }
+        
+        lastSignal!.IsContextWarm.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Edge_ResetAfterDisconnect_RequiresNewWarmup()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        // Warmup
+        for (int i = 0; i < 250; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 50, 5000.25m, 50));
+        }
+        
+        // Reset (simuliert Disconnect > 5s)
+        edge.Reset();
+        
+        // Nach Reset: nicht mehr warm
+        var afterReset = edge.ProcessSnapshot(new DomSnapshot(
+            t.AddMilliseconds(30000),
+            5000.00m, 100, 5000.25m, 20));
+        
+        afterReset.IsContextWarm.Should().BeFalse();
+        afterReset.Signal.Should().Be(0);
+    }
+}
+```
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# PHASE G: STRESS-TESTS (7 Tests)
+# ═══════════════════════════════════════════════════════════════
+
+**Datei:** `QTS.Edge.Tests/Stress/StressTests.cs`
+
+```csharp
+using FluentAssertions;
+using QTS.Edge.Core;
+using QTS.Edge.Core.Configuration;
+using QTS.Edge.Core.Models;
+using QTS.Edge.Core.Statistics;
+using System.Diagnostics;
+using Xunit;
+
+namespace QTS.Edge.Tests.Stress;
+
+public class StressTests
+{
+    [Fact]
+    public void Stress_10000Snapshots_Completes()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        for (int i = 0; i < 10000; i++)
+        {
+            var snapshot = new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m,
+                50 + (i % 100),
+                5000.25m,
+                50 + ((i + 30) % 100));
+            
+            var signal = edge.ProcessSnapshot(snapshot);
+            signal.Should().NotBeNull();
+        }
+    }
+
+    [Fact]
+    public void Stress_RapidSignalChanges_StableState()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        // Warmup
+        for (int i = 0; i < 250; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 50, 5000.25m, 50));
+        }
+        
+        // Rapid changes
+        for (int i = 0; i < 100; i++)
+        {
+            var imbalance = i % 2 == 0 ? (100, 10) : (10, 100);
+            var signal = edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds((250 + i) * 100),
+                5000.00m, imbalance.Item1, 5000.25m, imbalance.Item2));
+            
+            signal.Signal.Should().BeInRange(-1, 1);
+        }
+    }
+
+    [Fact]
+    public void Stress_WindowFullCycle_5x()
+    {
+        var config = new EdgeConfiguration { WindowSize = 1000, MinWarmupSamples = 100 };
+        var t = DateTime.UtcNow;
+        
+        for (int cycle = 0; cycle < 5; cycle++)
+        {
+            var edge = EdgeFactory.Create(config);
+            
+            for (int i = 0; i < 1500; i++)
+            {
+                var signal = edge.ProcessSnapshot(new DomSnapshot(
+                    t.AddMilliseconds(i * 100),
+                    5000.00m, 50 + (i % 50), 5000.25m, 50));
+                
+                signal.Should().NotBeNull();
+            }
+            
+            edge.Reset();
+        }
+    }
+
+    [Fact]
+    public void Stress_AlternatingQualityGates()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        for (int i = 0; i < 500; i++)
+        {
+            var isGood = i % 2 == 0;
+            var snapshot = new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m,
+                isGood ? 50 : 0,
+                5000.25m,
+                50);
+            
+            var signal = edge.ProcessSnapshot(snapshot);
+            signal.Should().NotBeNull();
+        }
+    }
+
+    [Fact]
+    public void Stress_ExtremeBidAskValues()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        var random = new Random(42);
+        
+        for (int i = 0; i < 500; i++)
+        {
+            var bid = random.Next(0, 10000);
+            var ask = random.Next(0, 10000);
+            
+            var signal = edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, bid, 5000.25m, ask));
+            
+            signal.Should().NotBeNull();
+            double.IsNaN(signal.StructImbRaw).Should().BeFalse();
+            double.IsNaN(signal.StructImbZ).Should().BeFalse();
+        }
+    }
+
+    [Fact]
+    public void Stress_MemoryStability_100Resets()
+    {
+        var config = new EdgeConfiguration { WindowSize = 1000, MinWarmupSamples = 100 };
+        var t = DateTime.UtcNow;
+        
+        for (int reset = 0; reset < 100; reset++)
+        {
+            var edge = EdgeFactory.Create(config);
+            
+            for (int i = 0; i < 200; i++)
+            {
+                edge.ProcessSnapshot(new DomSnapshot(
+                    t.AddMilliseconds(i * 100),
+                    5000.00m, 50, 5000.25m, 50));
+            }
+            
+            edge.Reset();
+        }
+        
+        // Wenn wir hier ankommen ohne OutOfMemoryException → Test bestanden
+        true.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Stress_ContinuousOperation_36000Snapshots()
+    {
+        // Simuliere 1 Stunde Betrieb
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        for (int i = 0; i < 36000; i++)
+        {
+            var signal = edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m,
+                50 + (i % 100),
+                5000.25m,
+                50 + ((i + 50) % 100)));
+            
+            if (i >= 200)
+            {
+                signal.IsContextWarm.Should().BeTrue();
+            }
+        }
+    }
+}
+```
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# PHASE H: CONCURRENCY-SICHERHEIT (4 Tests)
+# ═══════════════════════════════════════════════════════════════
+
+**Datei:** `QTS.Edge.Tests/Concurrency/ThreadSafetyTests.cs`
+
+```csharp
+using FluentAssertions;
+using QTS.Edge.Core;
+using QTS.Edge.Core.Models;
+using Xunit;
+
+namespace QTS.Edge.Tests.Concurrency;
+
+public class ThreadSafetyTests
+{
+    [Fact]
+    public void Edge_SingleThreaded_ByDesign()
+    {
+        // Dokumentations-Test: Edge ist NICHT thread-safe by design
+        // Dieser Test dokumentiert das erwartete Single-Thread Verhalten
+        
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        // Sequential calls work fine
+        for (int i = 0; i < 100; i++)
+        {
+            var signal = edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 50, 5000.25m, 50));
+            signal.Should().NotBeNull();
+        }
+    }
+
+    [Fact]
+    public void Edge_MultipleInstances_Independent()
+    {
+        // Mehrere Instanzen beeinflussen sich nicht
+        var edge1 = EdgeFactory.Create();
+        var edge2 = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        // Feed edge1 mit bullish data
+        for (int i = 0; i < 250; i++)
+        {
+            edge1.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 100, 5000.25m, 20));
+        }
+        
+        // Feed edge2 mit bearish data
+        for (int i = 0; i < 250; i++)
+        {
+            edge2.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 20, 5000.25m, 100));
+        }
+        
+        // Signals sollten unterschiedlich sein
+        var s1 = edge1.ProcessSnapshot(new DomSnapshot(
+            t.AddMilliseconds(25100),
+            5000.00m, 100, 5000.25m, 20));
+        var s2 = edge2.ProcessSnapshot(new DomSnapshot(
+            t.AddMilliseconds(25100),
+            5000.00m, 20, 5000.25m, 100));
+        
+        // Beide unabhängig
+        s1.StructImbRaw.Should().BePositive();
+        s2.StructImbRaw.Should().BeNegative();
+    }
+
+    [Fact]
+    public void Factory_CreateMultiple_NoSharedState()
+    {
+        var edges = new List<IStructImbL1Edge>();
+        
+        for (int i = 0; i < 10; i++)
+        {
+            edges.Add(EdgeFactory.Create());
+        }
+        
+        // Alle sollten unabhängig sein
+        var t = DateTime.UtcNow;
+        edges[0].ProcessSnapshot(new DomSnapshot(t, 5000.00m, 100, 5000.25m, 100));
+        
+        // Andere sollten nicht beeinflusst sein
+        for (int i = 1; i < edges.Count; i++)
+        {
+            var signal = edges[i].ProcessSnapshot(new DomSnapshot(t, 5000.00m, 50, 5000.25m, 50));
+            signal.IsContextWarm.Should().BeFalse(); // Noch nicht warm
+        }
+    }
+
+    [Fact]
+    public void Edge_ParallelInstances_NoInterference()
+    {
+        // Parallele Nutzung verschiedener Instanzen
+        var tasks = new List<Task<int>>();
+        
+        for (int instance = 0; instance < 5; instance++)
+        {
+            var localInstance = instance;
+            tasks.Add(Task.Run(() =>
+            {
+                var edge = EdgeFactory.Create();
+                var t = DateTime.UtcNow;
+                var count = 0;
+                
+                for (int i = 0; i < 300; i++)
+                {
+                    edge.ProcessSnapshot(new DomSnapshot(
+                        t.AddMilliseconds(i * 100),
+                        5000.00m,
+                        50 + localInstance,
+                        5000.25m,
+                        50));
+                    count++;
+                }
+                
+                return count;
+            }));
+        }
+        
+        Task.WaitAll(tasks.ToArray());
+        
+        foreach (var task in tasks)
+        {
+            task.Result.Should().Be(300);
+        }
+    }
+}
+```
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# PHASE I: INPUT-VALIDATION (10 Tests)
+# ═══════════════════════════════════════════════════════════════
+
+**Datei:** `QTS.Edge.Tests/Validation/InputValidationTests.cs`
+
+```csharp
+using FluentAssertions;
+using QTS.Edge.Core;
+using QTS.Edge.Core.Configuration;
+using QTS.Edge.Core.Models;
+using QTS.Edge.Core.Statistics;
+using Xunit;
+
+namespace QTS.Edge.Tests.Validation;
+
+public class InputValidationTests
+{
+    [Fact]
+    public void DomSnapshot_NegativeBidSize_Handled()
+    {
+        var edge = EdgeFactory.Create();
+        
+        Action act = () => edge.ProcessSnapshot(new DomSnapshot(
+            DateTime.UtcNow,
+            5000.00m,
+            -100,
+            5000.25m,
+            100));
+        
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void DomSnapshot_NegativeAskSize_Handled()
+    {
+        var edge = EdgeFactory.Create();
+        
+        Action act = () => edge.ProcessSnapshot(new DomSnapshot(
+            DateTime.UtcNow,
+            5000.00m,
+            100,
+            5000.25m,
+            -100));
+        
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void DomSnapshot_ZeroPrice_Handled()
+    {
+        var edge = EdgeFactory.Create();
+        
+        Action act = () => edge.ProcessSnapshot(new DomSnapshot(
+            DateTime.UtcNow,
+            0m,
+            100,
+            5000.25m,
+            100));
+        
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void DomSnapshot_NegativePrice_Handled()
+    {
+        var edge = EdgeFactory.Create();
+        
+        Action act = () => edge.ProcessSnapshot(new DomSnapshot(
+            DateTime.UtcNow,
+            -5000.00m,
+            100,
+            5000.25m,
+            100));
+        
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void DomSnapshot_AskLowerThanBid_Handled()
+    {
+        var edge = EdgeFactory.Create();
+        
+        // Invertierter Markt
+        var signal = edge.ProcessSnapshot(new DomSnapshot(
+            DateTime.UtcNow,
+            5001.00m,
+            100,
+            5000.00m,
+            100));
+        
+        signal.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Configuration_InvalidWindowSize_Throws()
+    {
+        Action act = () => new RollingStatistics(0, 100);
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void Configuration_NegativeWindowSize_Throws()
+    {
+        Action act = () => new RollingStatistics(-100, 100);
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void Configuration_WarmupExceedsWindow_Throws()
+    {
+        Action act = () => new RollingStatistics(100, 200);
+        act.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void Factory_NullConfig_UsesDefault()
+    {
+        var edge = EdgeFactory.Create(null);
+        edge.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Factory_CustomConfig_Applied()
+    {
+        var config = new EdgeConfiguration
+        {
+            WindowSize = 1000,
+            MinWarmupSamples = 50,
+            ZThreshold = 2.0
+        };
+        
+        var edge = EdgeFactory.Create(config);
+        edge.Should().NotBeNull();
+        
+        // Warmup sollte schneller sein
+        var t = DateTime.UtcNow;
+        IEdgeSignal? lastSignal = null;
+        
+        for (int i = 0; i < 60; i++)
+        {
+            lastSignal = edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 50, 5000.25m, 50));
+        }
+        
+        lastSignal!.IsContextWarm.Should().BeTrue();
+    }
+}
+```
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# PHASE J: BACKTEST-REPRODUZIERBARKEIT (7 Tests)
+# ═══════════════════════════════════════════════════════════════
+
+**Datei:** `QTS.Edge.Tests/Integration/BacktestReproducibilityTests.cs`
+
+```csharp
+using FluentAssertions;
+using QTS.Edge.Core;
+using QTS.Edge.Core.Configuration;
+using QTS.Edge.Core.Models;
+using Xunit;
+
+namespace QTS.Edge.Tests.Integration;
+
+public class BacktestReproducibilityTests
+{
+    [Fact]
+    public void Backtest_WarmupPhase_NoSignals()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        // Erste 199 Snapshots sollten alle Signal = 0 haben
+        for (int i = 0; i < 199; i++)
+        {
+            var signal = edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 100, 5000.25m, 20)); // Starke Imbalance
+            
+            signal.Signal.Should().Be(0, $"Signal at index {i} should be 0 during warmup");
+            signal.IsContextWarm.Should().BeFalse();
+        }
+    }
+
+    [Fact]
+    public void Backtest_AfterWarmup_SignalsGenerated()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        // Warmup mit starker Imbalance
+        for (int i = 0; i < 250; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 100, 5000.25m, 20));
+        }
+        
+        // Nach Warmup sollte Signal generiert werden
+        var signal = edge.ProcessSnapshot(new DomSnapshot(
+            t.AddMilliseconds(25100),
+            5000.00m, 100, 5000.25m, 20));
+        
+        signal.IsContextWarm.Should().BeTrue();
+        // Bei starker Imbalance sollte Z > 1.5 sein → Signal != 0
+    }
+
+    [Fact]
+    public void Backtest_SignalDistribution_Plausible()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        var random = new Random(42);
+        
+        int longCount = 0, shortCount = 0, flatCount = 0;
+        
+        for (int i = 0; i < 1000; i++)
+        {
+            // Simuliere realistische Imbalance
+            var bidBias = random.NextDouble() * 0.4 - 0.2; // -0.2 to +0.2
+            var baseBid = 50;
+            var baseAsk = 50;
+            var bid = (int)(baseBid * (1 + bidBias));
+            var ask = (int)(baseAsk * (1 - bidBias));
+            
+            var signal = edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, Math.Max(1, bid), 5000.25m, Math.Max(1, ask)));
+            
+            switch (signal.Signal)
+            {
+                case 1: longCount++; break;
+                case -1: shortCount++; break;
+                default: flatCount++; break;
+            }
+        }
+        
+        // Plausibilitäts-Checks
+        flatCount.Should().BeGreaterThan(longCount + shortCount, 
+            "FLAT should be most common due to Z-threshold");
+        Math.Abs(longCount - shortCount).Should().BeLessThan(100, 
+            "LONG and SHORT should be roughly balanced");
+    }
+
+    [Fact]
+    public void Backtest_DeterministicSequence_MatchesExpected()
+    {
+        // Definierte Sequenz mit bekanntem Ergebnis
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        var results = new List<int>();
+        
+        // Warmup
+        for (int i = 0; i < 200; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 50, 5000.25m, 50));
+        }
+        
+        // Bekannte Sequenz
+        var testData = new[]
+        {
+            (100, 50),  // Bullish
+            (100, 50),
+            (100, 50),
+            (50, 100),  // Bearish
+            (50, 100),
+            (50, 50),   // Neutral
+        };
+        
+        foreach (var (bid, ask) in testData)
+        {
+            var signal = edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds((200 + results.Count) * 100),
+                5000.00m, bid, 5000.25m, ask));
+            results.Add(signal.Signal);
+        }
+        
+        // Run again - should be identical
+        var edge2 = EdgeFactory.Create();
+        var results2 = new List<int>();
+        
+        for (int i = 0; i < 200; i++)
+        {
+            edge2.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 50, 5000.25m, 50));
+        }
+        
+        foreach (var (bid, ask) in testData)
+        {
+            var signal = edge2.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds((200 + results2.Count) * 100),
+                5000.00m, bid, 5000.25m, ask));
+            results2.Add(signal.Signal);
+        }
+        
+        results.Should().BeEquivalentTo(results2, "Results should be deterministic");
+    }
+
+    [Fact]
+    public void Backtest_NoDirectReversals_InNormalData()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        var random = new Random(123);
+        
+        int? prevSignal = null;
+        int directReversals = 0;
+        
+        for (int i = 0; i < 500; i++)
+        {
+            var bid = 50 + random.Next(-30, 30);
+            var ask = 50 + random.Next(-30, 30);
+            
+            var signal = edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, Math.Max(1, bid), 5000.25m, Math.Max(1, ask)));
+            
+            if (prevSignal.HasValue)
+            {
+                // Direct reversal: LONG→SHORT or SHORT→LONG ohne FLAT
+                if ((prevSignal == 1 && signal.Signal == -1) ||
+                    (prevSignal == -1 && signal.Signal == 1))
+                {
+                    directReversals++;
+                }
+            }
+            
+            prevSignal = signal.Signal;
+        }
+        
+        directReversals.Should().Be(0, "No direct reversals should occur with hysteresis");
+    }
+
+    [Fact]
+    public void Backtest_SignalPersistence_ReasonableDuration()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        // Warmup mit Imbalance
+        for (int i = 0; i < 250; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 80, 5000.25m, 40));
+        }
+        
+        // Signal sollte eine Weile halten
+        int signalDuration = 0;
+        int lastSignal = 0;
+        
+        for (int i = 0; i < 50; i++)
+        {
+            var signal = edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds((250 + i) * 100),
+                5000.00m, 70, 5000.25m, 50)); // Leicht reduzierte Imbalance
+            
+            if (signal.Signal != 0 && signal.Signal == lastSignal)
+            {
+                signalDuration++;
+            }
+            lastSignal = signal.Signal;
+        }
+        
+        // Signal sollte mindestens ein paar Ticks halten
+        signalDuration.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void Backtest_QualityGateRespected()
+    {
+        var edge = EdgeFactory.Create();
+        var t = DateTime.UtcNow;
+        
+        // Warmup
+        for (int i = 0; i < 250; i++)
+        {
+            edge.ProcessSnapshot(new DomSnapshot(
+                t.AddMilliseconds(i * 100),
+                5000.00m, 100, 5000.25m, 20));
+        }
+        
+        // Snapshot mit schlechtem Spread
+        var badSignal = edge.ProcessSnapshot(new DomSnapshot(
+            t.AddMilliseconds(25100),
+            5000.00m, 100, 5002.00m, 20)); // 8 Ticks Spread
+        
+        badSignal.Signal.Should().Be(0);
+        badSignal.IsQualityGatePassed.Should().BeFalse();
+    }
+}
+```
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# AUSFÜHRUNG
+# ═══════════════════════════════════════════════════════════════
+
+Nach dem Erstellen ALLER Test-Dateien:
+
+```bash
+# Build
+dotnet build
+
+# Alle Tests ausführen
+dotnet test --logger "console;verbosity=normal"
+
+# Test-Ergebnis zählen
+dotnet test --list-tests | wc -l
+```
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# REPORT ERSTELLEN
+# ═══════════════════════════════════════════════════════════════
+
+Erstelle am Ende: `FULL_TEST_REPORT.md`
+
+```markdown
+# QTS.Edge Vollständiger Test Report
+
+## Datum: [DATUM]
+
+## Zusammenfassung
+- Total Tests: [ANZAHL]
+- Passed: [ANZAHL]
+- Failed: [ANZAHL]
+
+## Phase A: Determinismus
+- Tests: [X/7]
+- Status: [PASSED/FAILED]
+- Fehlgeschlagen: [Liste]
+
+## Phase B: Edge Cases
+- Tests: [X/20]
+- Status: [PASSED/FAILED]
+- Fehlgeschlagen: [Liste]
+
+## Phase C: Numerische Stabilität
+- Tests: [X/12]
+- Status: [PASSED/FAILED]
+- Fehlgeschlagen: [Liste]
+
+## Phase D: Quality Gate Interaction
+- Tests: [X/9]
+- Status: [PASSED/FAILED]
+- Fehlgeschlagen: [Liste]
+
+## Phase E: Hysterese & Cooldown
+- Tests: [X/13]
+- Status: [PASSED/FAILED]
+- Fehlgeschlagen: [Liste]
+
+## Phase F: Timing
+- Tests: [X/8]
+- Status: [PASSED/FAILED]
+- Fehlgeschlagen: [Liste]
+
+## Phase G: Stress
+- Tests: [X/7]
+- Status: [PASSED/FAILED]
+- Fehlgeschlagen: [Liste]
+
+## Phase H: Concurrency
+- Tests: [X/4]
+- Status: [PASSED/FAILED]
+- Fehlgeschlagen: [Liste]
+
+## Phase I: Input Validation
+- Tests: [X/10]
+- Status: [PASSED/FAILED]
+- Fehlgeschlagen: [Liste]
+
+## Phase J: Backtest Reproduzierbarkeit
+- Tests: [X/7]
+- Status: [PASSED/FAILED]
+- Fehlgeschlagen: [Liste]
+
+## Fehlgeschlagene Tests - Details
+
+### [TEST NAME]
+- Datei: [DATEI]
+- Fehlermeldung: [FEHLER]
+- Betroffene Komponente: [KOMPONENTE]
+- Ursache: [ANALYSE]
+
+## Empfehlungen
+[Nur Beschreibungen, KEINE Code-Änderungen!]
+```
+
+---
+
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║  🚨 FINALE ERINNERUNG 🚨                                      ║
+# ╚═══════════════════════════════════════════════════════════════╝
+
+1. ERSTELLE nur Dateien in QTS.Edge.Tests/
+2. ÄNDERE NIEMALS Dateien in QTS.Edge.Core/
+3. DOKUMENTIERE Fehler, FIXE sie NICHT
+4. Der Mensch entscheidet über Fixes NACH dem Test
+
+Starte jetzt!

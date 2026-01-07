@@ -1,0 +1,187 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        // ============================================================
+        // GENERAL TASKS
+        // ============================================================
+        {
+            "label": "build",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "build",
+                "${workspaceFolder}/QTS.Edge.sln",
+                "/property:GenerateFullPaths=true",
+                "/consoleloggerparameters:NoSummary;ForceNoAlign"
+            ],
+            "problemMatcher": "$msCompile",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "test",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "test",
+                "${workspaceFolder}/QTS.Edge.sln",
+                "--no-build",
+                "--logger",
+                "console;verbosity=normal"
+            ],
+            "problemMatcher": "$msCompile",
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "dependsOn": "build"
+        },
+        {
+            "label": "test-verbose",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "test",
+                "${workspaceFolder}/QTS.Edge.sln",
+                "--no-build",
+                "--logger",
+                "console;verbosity=detailed"
+            ],
+            "problemMatcher": "$msCompile",
+            "dependsOn": "build"
+        },
+        {
+            "label": "clean",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "clean",
+                "${workspaceFolder}/QTS.Edge.sln"
+            ],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "restore",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "restore",
+                "${workspaceFolder}/QTS.Edge.sln"
+            ],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "rebuild",
+            "dependsOn": ["clean", "restore", "build"],
+            "dependsOrder": "sequence",
+            "problemMatcher": "$msCompile"
+        },
+        // ============================================================
+        // BACKTEST-SPECIFIC TASKS
+        // ============================================================
+        {
+            "label": "test-adapter",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "test",
+                "${workspaceFolder}/QTS.Backtest.Adapter.Tests/QTS.Backtest.Adapter.Tests.csproj",
+                "--logger",
+                "console;verbosity=normal"
+            ],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "test-engine",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "test",
+                "${workspaceFolder}/QTS.Backtest.Engine.Tests/QTS.Backtest.Engine.Tests.csproj",
+                "--logger",
+                "console;verbosity=normal"
+            ],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "test-integration",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "test",
+                "${workspaceFolder}/QTS.Backtest.Integration.Tests/QTS.Backtest.Integration.Tests.csproj",
+                "--logger",
+                "console;verbosity=normal"
+            ],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "test-backtest-all",
+            "dependsOn": ["test-adapter", "test-engine", "test-integration"],
+            "dependsOrder": "sequence",
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "watch-adapter-tests",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "watch",
+                "--project",
+                "${workspaceFolder}/QTS.Backtest.Adapter.Tests/QTS.Backtest.Adapter.Tests.csproj",
+                "test",
+                "--logger",
+                "console;verbosity=normal"
+            ],
+            "problemMatcher": "$msCompile",
+            "isBackground": true
+        },
+        {
+            "label": "watch-engine-tests",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "watch",
+                "--project",
+                "${workspaceFolder}/QTS.Backtest.Engine.Tests/QTS.Backtest.Engine.Tests.csproj",
+                "test",
+                "--logger",
+                "console;verbosity=normal"
+            ],
+            "problemMatcher": "$msCompile",
+            "isBackground": true
+        },
+        // ============================================================
+        // EDGE TASKS (Original)
+        // ============================================================
+        {
+            "label": "test-edge",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "test",
+                "${workspaceFolder}/QTS.Edge.Tests/QTS.Edge.Tests.csproj",
+                "--logger",
+                "console;verbosity=normal"
+            ],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "watch-test",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "watch",
+                "--project",
+                "${workspaceFolder}/QTS.Edge.Tests/QTS.Edge.Tests.csproj",
+                "test",
+                "--logger",
+                "console;verbosity=normal"
+            ],
+            "problemMatcher": "$msCompile",
+            "isBackground": true
+        }
+    ]
+}
